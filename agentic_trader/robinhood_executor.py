@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime
 import os
 import json
+import time
 from risk_guard import Order, Position, AccountState
 
 
@@ -38,6 +39,90 @@ class Fill:
     price: float
     notional: float
     ts: datetime
+
+
+# --------------------------------------------------------------------------- #
+# Real market data (paper mode marks to market against live prices)
+# --------------------------------------------------------------------------- #
+_QUOTE_TTL_SECONDS = 15
+_quote_cache: dict[str, tuple[float, tuple[float, float, float]]] = {}
+
+
+def yfinance_quote(symbol: str) -> tuple[float, float, float]:
+    """Return ``(last_price, previous_close, data_age_seconds)`` from yfinance.
+
+    Replaces the constant placeholder so the PaperExecutor marks positions to
+    *live* prices. ``previous_close`` feeds risk_guard's price-deviation check
+    and ``data_age_seconds`` feeds its staleness check, so the same guard rails
+    apply in paper as in live.
+
+    Resilient by design: tries intraday (for a fresh price + a real timestamp),
+    then ``fast_info``, then daily bars. Raises ``RuntimeError`` only when no
+    usable price can be found — callers skip the symbol rather than act on a
+    zero/garbage mark. Results are cached briefly to avoid hammering Yahoo when
+    a single cycle quotes the same symbol several times.
+    """
+    now_mono = time.monotonic()
+    cached = _quote_cache.get(symbol)
+    if cached and now_mono - cached[0] < _QUOTE_TTL_SECONDS:
+        return cached[1]
+
+    import pandas as pd
+    import yfinance as yf
+
+    t = yf.Ticker(symbol)
+    last: float | None = None
+    prev_close: float | None = None
+    age = float("inf")
+
+    def _age_from(ts) -> float:
+        now = pd.Timestamp.now(tz=ts.tz) if ts.tz is not None else pd.Timestamp.utcnow()
+        return float((now - ts).total_seconds())
+
+    # 1) Intraday: freshest price and a real timestamp to age it.
+    try:
+        intraday = t.history(period="1d", interval="1m", auto_adjust=False)
+        if not intraday.empty:
+            last = float(intraday["Close"].iloc[-1])
+            age = _age_from(intraday.index[-1])
+    except Exception:
+        pass
+
+    # 2) fast_info: previous close (+ last-price fallback).
+    try:
+        fi = t.fast_info
+        pc = fi.get("previous_close") if isinstance(fi, dict) else getattr(fi, "previous_close", None)
+        if pc:
+            prev_close = float(pc)
+        if last is None:
+            lp = fi.get("last_price") if isinstance(fi, dict) else getattr(fi, "last_price", None)
+            if lp:
+                last = float(lp)
+    except Exception:
+        pass
+
+    # 3) Daily fallback for anything still missing.
+    if last is None or prev_close is None:
+        try:
+            daily = t.history(period="5d", auto_adjust=False)
+            if not daily.empty:
+                if last is None:
+                    last = float(daily["Close"].iloc[-1])
+                if prev_close is None:
+                    prev_close = float(daily["Close"].iloc[-2]) if len(daily) >= 2 else last
+                if age == float("inf"):
+                    age = _age_from(daily.index[-1])
+        except Exception:
+            pass
+
+    if last is None or last <= 0:
+        raise RuntimeError(f"no usable quote for {symbol}")
+    if prev_close is None or prev_close <= 0:
+        prev_close = last  # neutral: no deviation signal beats a false one
+
+    result = (last, prev_close, age)
+    _quote_cache[symbol] = (now_mono, result)
+    return result
 
 
 class BrokerExecutor:
@@ -110,7 +195,10 @@ class PaperExecutor(BrokerExecutor):
     def mark_to_market(self):
         """Refresh last/high-water for open positions (call each cycle)."""
         for p in self.positions.values():
-            last, _, _ = self.get_quote(p.symbol)
+            try:
+                last, _, _ = self.get_quote(p.symbol)
+            except Exception:
+                continue  # transient fetch failure: keep the last good mark
             p.last_price = last
             p.high_water_price = max(p.high_water_price, last)
 
@@ -183,7 +271,9 @@ class LiveExecutor(BrokerExecutor):
 
 def build_executor(cfg, mcp_client=None) -> BrokerExecutor:
     if cfg["mode"]["execution_mode"] == "paper":
-        return PaperExecutor(cfg["account"]["allocated_capital_usd"])
+        return PaperExecutor(
+            cfg["account"]["allocated_capital_usd"], quote_fn=yfinance_quote
+        )
     if mcp_client is None:
         raise RuntimeError("LIVE mode needs a connected Robinhood MCP client.")
     return LiveExecutor(mcp_client)
