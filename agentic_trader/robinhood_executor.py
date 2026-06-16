@@ -268,7 +268,17 @@ class LiveExecutor(BrokerExecutor):
         return Fill(order.symbol, order.side, qty, fill_px, qty * fill_px, datetime.now())
 
     def cancel_all(self):
-        self.mcp.call_tool("cancel_all_orders", {})               # <-- VERIFY NAME
+        # Robinhood's documented cancel tool is per-order (cancel_equity_order),
+        # and there is no documented bulk-cancel tool — so enumerate the open
+        # orders and cancel each by id rather than calling a single "cancel all".
+        resp = self.mcp.call_tool("get_equity_orders", {"state": "open"})  # <-- VERIFY NAME/ARGS
+        orders = resp.get("orders", []) if isinstance(resp, dict) else (resp or [])
+        for o in orders:
+            order_id = o.get("id") or o.get("order_id")
+            if order_id:
+                self.mcp.call_tool(                                       # <-- VERIFY NAME/ARGS
+                    "cancel_equity_order", {"order_id": order_id}
+                )
 
 
 def build_executor(cfg, mcp_client=None) -> BrokerExecutor:
