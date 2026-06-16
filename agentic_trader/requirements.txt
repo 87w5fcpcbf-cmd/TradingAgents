@@ -1,0 +1,24 @@
+# Core
+pyyaml>=6.0
+# Agent brain — TradingAgents. In this repo the brain is the parent package,
+# installed editable from the repo root:
+#   pip install -e ..
+# (The upstream README points at the fork
+#   https://github.com/bit-r/TradingAgents-AI-hedge-fund.git
+#  which is the same framework; the parent of this directory already provides it.)
+# It pulls in langgraph / langchain and your chosen LLM SDK.
+langgraph>=0.2
+langchain>=0.3
+# Market data for the analysts + quotes (pick what you have access to)
+yfinance>=0.2        # free, fine for testing; upgrade to a real feed for live
+pandas>=2.0
+# Scheduling alternative if you prefer cron-like control over the simple loop
+apscheduler>=3.10
+# MCP client for the live Robinhood connection (one of):
+#   pip install mcp          # official Python MCP SDK
+#   pip install fastmcp
+mcp>=1.0
+# LLM SDK — install the one matching config.llm.deep_model
+#   pip install anthropic        # for Claude
+#   pip install openai           # for GPT / Codex
+anthropic>=0.40

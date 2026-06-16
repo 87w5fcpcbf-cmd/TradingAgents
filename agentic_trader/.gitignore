@@ -1,0 +1,4 @@
+# Local secrets and generated artifacts
+.env
+logs/*.jsonl
+state.json

@@ -1,0 +1,78 @@
+# ============================================================================
+# Agentic Trader — master configuration  (CALCULATED-AGGRESSIVE profile)
+# Limits are enforced in deterministic code (risk_guard.py), OUTSIDE the LLM.
+# These defaults are tuned hot. Every number is yours to push — except the
+# catastrophic backstop, which exists to survive bugs/black-swans, not to
+# cap your strategy. Raise it if you want; just know what it protects.
+# ============================================================================
+
+mode:
+  # "paper"  -> simulated fills, no real orders. Use it to confirm the WIRING
+  #             works (right sign, right qty, no infinite loop). Deployment
+  #             hygiene, not cold feet — flip to live after even one clean run.
+  # "live"   -> autonomous live trading on the Agentic account.
+  execution_mode: "paper"          # <-- change to "live" when the plumbing checks out
+  manual_approval_above_usd: 100000  # effectively off; raise the bar so it runs hands-free
+
+account:
+  # The DEDICATED Robinhood Agentic wallet only — structurally isolated from
+  # your main portfolio. Fund it with your risk capital. This IS your max loss.
+  allocated_capital_usd: 1000      # your call
+
+risk:
+  # ---- Position sizing (concentrated / high-conviction) ----
+  max_position_pct_of_account: 0.30   # up to 30% in one name — concentrated bets
+  max_single_order_notional_pct: 0.30 # one order up to 30% of account
+  max_open_positions: 5               # few, high-conviction positions
+  min_order_notional_usd: 5
+
+  # ---- The calculated core: asymmetric risk/reward ----
+  hard_stop_loss_pct: 0.08            # cut any loser at -8%, no exceptions
+  trailing_stop_pct: 0.12             # let winners run; trail 12% off the high
+  take_profit_pct: null               # null = no cap on upside (ride the trend)
+
+  # ---- Loss controls: wide for daily noise, hard backstop for catastrophe ----
+  daily_loss_limit_pct: 0.10          # ride a -10% day before pausing till tomorrow
+  max_drawdown_halt_pct: 0.30         # CATASTROPHIC backstop: full stop at -30% from peak
+  consecutive_losing_days_review: 6   # flag for review (not a hard halt)
+
+  # ---- Turnover (active, but not self-harming via fees/PDT) ----
+  max_trades_per_day: 25
+  max_orders_per_symbol_per_day: 4
+  min_minutes_between_orders: 2
+
+  # ---- Data integrity (rejects garbage, not strategy) ----
+  max_price_deviation_pct: 0.15       # reject quotes >15% off last close (stale/bad feed)
+  require_fresh_data_seconds: 600     # don't act on data older than 10 min
+
+universe:
+  blocked_symbols: []                 # add anything you never want it touching
+  allowed_symbols: []                 # empty = any tradable equity
+
+strategy:
+  # Posture the agents trade with. See prompts.py for the full instructions.
+  style: "momentum_catalyst"          # relative strength + catalyst-driven
+  regime_aware: true                  # size up in trends, down in chop
+  conviction_sizing: true             # bigger size = higher conviction score
+  min_conviction_to_enter: 0.6        # 0-1; below this it stands down
+
+schedule:
+  market_open: "09:30"
+  market_close: "16:00"
+  timezone: "America/New_York"
+  poll_interval_minutes: 10           # re-evaluate every 10 min during the session
+  skip_first_minutes: 3
+  skip_last_minutes: 3
+  trade_premarket: false
+  trade_afterhours: false
+
+llm:
+  deep_model: "claude"                # trader + portfolio-manager reasoning
+  shallow_model: "claude-haiku-or-equivalent"
+  temperature: 0.3
+  max_debate_rounds: 2
+
+logging:
+  decision_log_path: "./logs/decisions.jsonl"
+  trade_log_path: "./logs/trades.jsonl"
+  log_every_prompt: true
