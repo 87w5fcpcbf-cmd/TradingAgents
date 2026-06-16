@@ -24,7 +24,7 @@ generic async MCP client call. Do NOT hardcode credentials — load from env.
 
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 import json
 import time
@@ -189,8 +189,10 @@ class PaperExecutor(BrokerExecutor):
                 qty = p.qty
         self.trades_today += 1
         self.orders_per_symbol[order.symbol] = self.orders_per_symbol.get(order.symbol, 0) + 1
-        self.last_order_time = datetime.now()
-        return Fill(order.symbol, order.side, qty, px, qty * px, datetime.now())
+        # Timezone-aware: risk_guard compares this against its tz-aware clock for
+        # the min_minutes_between_orders check. A naive value crashes that compare.
+        self.last_order_time = datetime.now(timezone.utc)
+        return Fill(order.symbol, order.side, qty, px, qty * px, datetime.now(timezone.utc))
 
     def mark_to_market(self):
         """Refresh last/high-water for open positions (call each cycle)."""
