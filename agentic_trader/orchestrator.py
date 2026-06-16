@@ -20,7 +20,7 @@ import json
 import os
 import re
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import yaml
 
@@ -245,17 +245,29 @@ class Orchestrator:
         os.makedirs(os.path.dirname(self.cfg["logging"]["decision_log_path"]), exist_ok=True)
 
     def _account(self) -> AccountState:
-        """Account snapshot with persisted peak/day-start baselines applied.
+        """Account snapshot with orchestrator-owned durable state applied.
 
-        The executor only knows the live equity; the catastrophic-drawdown and
-        daily-loss halts need baselines that outlive a restart, so we fold the
-        current equity into the StateStore and stamp the durable values back on.
+        The executor only reports broker truth (equity, cash, positions). The
+        drawdown/daily-loss baselines, the per-position high-water marks the
+        trailing stop needs, and the churn counters the turnover limits gate on
+        must outlive a restart and be tracked by us — in live they are absent
+        from the broker's AccountState entirely. Fold this cycle in via the
+        StateStore and stamp the durable values back on.
         """
         acct = self.exe.get_account()
         today = datetime.now(self.tz).date().isoformat()
-        peak, day_start = self.state.sync(acct.equity, today)
-        acct.peak_equity = peak
-        acct.day_start_equity = day_start
+        pos_last = {s: p.last_price for s, p in acct.positions.items()}
+        snap = self.state.begin_cycle(acct.equity, today, pos_last)
+
+        acct.peak_equity = snap["peak_equity"]
+        acct.day_start_equity = snap["day_start_equity"]
+        acct.trades_today = snap["trades_today"]
+        acct.orders_per_symbol_today = dict(snap["orders_per_symbol"])
+        acct.last_order_time = snap["last_order_time"]
+        for sym, p in acct.positions.items():
+            hw = snap["high_water"].get(sym)
+            if hw is not None:
+                p.high_water_price = max(p.high_water_price, hw)
         return acct
 
     def _log(self, path_key: str, record: dict):
@@ -278,6 +290,9 @@ class Orchestrator:
             return
         fill = self.exe.place_order(decision.order)
         if fill:
+            # Orchestrator owns the churn counters (the broker won't report them
+            # in live), so record every fill here for the turnover limits.
+            self.state.record_fill(fill.symbol, datetime.now(timezone.utc))
             self._log("trade_log_path", {
                 "symbol": fill.symbol, "side": fill.side, "qty": fill.qty,
                 "price": fill.price, "notional": fill.notional,
