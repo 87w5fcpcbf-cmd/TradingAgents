@@ -26,6 +26,7 @@ import yaml
 
 from risk_guard import RiskGuard, Order, AccountState
 from robinhood_executor import build_executor, PaperExecutor
+from state_store import StateStore
 import prompts
 
 logger = logging.getLogger("agentic_trader.orchestrator")
@@ -239,7 +240,23 @@ class Orchestrator:
         self.tz = ZoneInfo(self.cfg["schedule"]["timezone"])
         self.watchlist = watchlist or ["NVDA", "AMD", "PLTR", "TSLA", "META"]
         self.decide_fn = decide_fn
+        # Durable drawdown/daily baselines so the halts survive restarts.
+        self.state = StateStore(self.cfg["logging"].get("state_path", "state.json"))
         os.makedirs(os.path.dirname(self.cfg["logging"]["decision_log_path"]), exist_ok=True)
+
+    def _account(self) -> AccountState:
+        """Account snapshot with persisted peak/day-start baselines applied.
+
+        The executor only knows the live equity; the catastrophic-drawdown and
+        daily-loss halts need baselines that outlive a restart, so we fold the
+        current equity into the StateStore and stamp the durable values back on.
+        """
+        acct = self.exe.get_account()
+        today = datetime.now(self.tz).date().isoformat()
+        peak, day_start = self.state.sync(acct.equity, today)
+        acct.peak_equity = peak
+        acct.day_start_equity = day_start
+        return acct
 
     def _log(self, path_key: str, record: dict):
         record["ts"] = datetime.now(self.tz).isoformat()
@@ -270,7 +287,7 @@ class Orchestrator:
     def run_cycle(self):
         if isinstance(self.exe, PaperExecutor):
             self.exe.mark_to_market()
-        acct = self.exe.get_account()
+        acct = self._account()
 
         # hard catastrophic / daily checks surface immediately
         halt = self.guard.catastrophic_halt(acct) or self.guard.daily_paused(acct)
@@ -286,7 +303,7 @@ class Orchestrator:
         for ex in self.guard.stop_loss_exits(acct):
             print(f"  ! protective exit: {ex.symbol} ({ex.reason})")
             self._execute(ex, acct)
-            acct = self.exe.get_account()
+            acct = self._account()
 
         # 2) new intentions, gated
         for order in self.decide_fn(self.watchlist, acct, self.cfg):
@@ -294,7 +311,7 @@ class Orchestrator:
                 print(f"  – skip {order.symbol}: conviction {order.conviction} < threshold")
                 continue
             self._execute(order, acct)
-            acct = self.exe.get_account()
+            acct = self._account()
 
         eq = acct.equity
         print(f"[{datetime.now(self.tz):%H:%M}] equity ${eq:,.2f} | "
