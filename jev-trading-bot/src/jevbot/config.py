@@ -12,6 +12,7 @@ class Config:
     db_path: str = "jevbot.db"
     approval_usd: float = 5000.0
     approval_timeout_s: int = 600
+    target_position_pct: float = 0.05   # normal order size; below max_position_pct
     max_position_pct: float = 0.10
     max_position_pct_leveraged: float = 0.03
     max_exposure_pct: float = 0.25

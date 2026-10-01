@@ -107,5 +107,12 @@ class Db:
         self._c.execute("UPDATE approvals SET status=? WHERE id=? AND status='pending'", (status, aid))
         self._c.commit()
 
+    def mark_approval(self, aid: int, status: str) -> None:
+        self._c.execute("UPDATE approvals SET status=? WHERE id=?", (status, aid))
+        self._c.commit()
+
+    def approvals_with_status(self, status: str) -> list[dict[str, Any]]:
+        return [self.get_approval(r["id"]) for r in self._c.execute("SELECT id FROM approvals WHERE status=?", (status,))]
+
     def pending_approvals(self) -> list[dict[str, Any]]:
         return [self.get_approval(r["id"]) for r in self._c.execute("SELECT id FROM approvals WHERE status='pending'")]
