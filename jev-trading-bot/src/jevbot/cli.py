@@ -8,7 +8,7 @@ import sys
 import time
 from zoneinfo import ZoneInfo
 
-import pandas as pd
+import requests
 
 from . import backtest as bt
 from .alerts import Alerts
@@ -129,8 +129,19 @@ def _build_deps(args) -> Deps:
     return Deps(db=db, cfg=cfg, risk=risk, approvals=ap, alerts=alerts, broker=broker, strategy=strategy, data_fn=data_fn)
 
 
+def _heartbeat() -> None:
+    """Ping an external uptime monitor (e.g. healthchecks.io) so a silent Pi gets noticed."""
+    url = os.environ.get("HEALTHCHECK_URL")
+    if url:
+        try:
+            requests.get(url, timeout=10)
+        except requests.RequestException:
+            pass  # the monitor itself raises the alarm when pings stop
+
+
 def run_loop(d: Deps, interval_s: int = 15) -> None:
     last_done: dt.date | None = None
+    last_beat = 0.0
     d.alerts.send(f"jevbot started (PAPER). Strategy {d.strategy.name}, validated={d.strategy.validated}.")
     while True:
         try:
@@ -150,6 +161,9 @@ def run_loop(d: Deps, interval_s: int = 15) -> None:
             d.alerts.send(f"ERROR in main loop: {e}")
         except Exception as e:  # never die silently: alert and keep the safety stops in place
             d.alerts.send(f"ERROR in main loop: {type(e).__name__}: {e}")
+        if time.monotonic() - last_beat > 300:
+            _heartbeat()
+            last_beat = time.monotonic()
         time.sleep(interval_s)
 
 
