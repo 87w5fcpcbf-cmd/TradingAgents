@@ -1,7 +1,7 @@
 """Orchestration: data -> rules -> Jev gate -> risk -> (approval) -> broker -> alerts -> db.
 
-Every order, approved or not, passes through Risk.guard. Exits are handled by the bracket orders
-that live at the broker, so nothing here depends on Jev to get out of a position.
+Every entry passes through Risk.check/guard. Exits never depend on Jev: rule exits close the position,
+and stop/take-profit bracket legs live at the broker so they work even if this process is down.
 """
 from __future__ import annotations
 

@@ -70,3 +70,8 @@ class Broker:
         for o in self._req("GET", "/v2/orders", params={"status": "open", "symbols": symbol, "nested": "true"}):
             self._req("DELETE", f"/v2/orders/{o['id']}")
         return self._req("DELETE", f"/v2/positions/{symbol}")
+
+    def is_session_today(self, day: str) -> bool:
+        """True if the market has a regular session on `day` (YYYY-MM-DD); False on holidays/weekends."""
+        cal = self._req("GET", "/v2/calendar", params={"start": day, "end": day})
+        return any(c.get("date") == day for c in cal)

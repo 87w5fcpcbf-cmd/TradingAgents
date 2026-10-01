@@ -25,6 +25,7 @@ class Strategy:
     stop_loss_pct: float
     take_profit_pct: float
     jev_thresholds: dict[str, float] = field(default_factory=dict)
+    validated: bool = False  # True only when written by `jevbot backtest` after passing the survival filter
 
     def __post_init__(self):
         if self.name not in CANDIDATES:
@@ -75,7 +76,8 @@ def render(s: Strategy, stats: dict | None = None) -> str:
         f"| Symbols | {', '.join(s.symbols)} |", f"| Timeframe | {s.timeframe} |",
         f"| Entry | {s.entry} |", f"| Exit | {s.exit} |",
         f"| Stop loss | {s.stop_loss_pct:.1%} |", f"| Take profit | {s.take_profit_pct:.1%} |",
-        f"| Leveraged | {'yes (reduced position cap)' if s.leveraged else 'no'} |", "",
+        f"| Leveraged | {'yes (reduced position cap)' if s.leveraged else 'no'} |",
+        f"| Backtest-validated | {'yes' if s.validated else 'NO - unvalidated, run `jevbot backtest`'} |", "",
         "Jev must clear every threshold before a trade fires:", "",
     ]
     lines += [f"- {k}: >= {v}" for k, v in s.jev_thresholds.items()]
