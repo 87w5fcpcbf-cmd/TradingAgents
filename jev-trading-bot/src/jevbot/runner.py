@@ -74,7 +74,7 @@ def _place(d: Deps, o: Order, stop: float, tp: float, probs: dict[str, float]) -
 
 
 def tick(d: Deps) -> dict[str, Any]:
-    out = {"status": "ok", "orders": 0, "pending": 0}
+    out = {"status": "ok", "orders": 0, "pending": 0, "exits": 0}
     if d.risk.is_killed():
         return {**out, "status": "killed"}
     st = d.strategy
@@ -91,7 +91,8 @@ def tick(d: Deps) -> dict[str, Any]:
     d.risk.record_fresh_data()
     try:
         acct = _account(d)
-        held = {p["symbol"] for p in d.broker.positions()}
+        positions = d.broker.positions()
+        held = {p["symbol"] for p in positions}
     except BrokerError as e:
         d.risk.record_broker_error()
         d.alerts.send(f"ERROR reading account: {e}")
@@ -102,6 +103,25 @@ def tick(d: Deps) -> dict[str, Any]:
     decided = {(e["date"], e["symbol"]) for e in d.db.events("decided")}
     waiting = {a["order"]["symbol"] for a in d.db.pending_approvals()}
     last = CANDIDATES[st.name](closes).iloc[-1]
+    for p in positions:  # rule-based exits: never depend on Jev
+        sym = p["symbol"]
+        if sym in st.symbols and last.get(sym, 1) <= 0:
+            try:
+                d.broker.close_position(sym)
+            except BrokerError as e:
+                d.risk.record_broker_error()
+                d.alerts.send(f"EXIT FAILED for {sym} (position may be unprotected, check Alpaca): {e}")
+                continue
+            d.risk.record_broker_ok()
+            held.discard(sym)
+            pnl = round((float(p["current_price"]) - float(p["avg_entry_price"])) * float(p["qty"]), 2)
+            for t in reversed(d.db.trades()):
+                if t["symbol"] == sym and t.get("pnl") is None:
+                    d.db.update_trade(t["id"], pnl=pnl, exit="rule")
+                    break
+            d.db.log_event("exit", {"symbol": sym, "pnl_est": pnl})
+            d.alerts.send(f"CLOSED {sym} (rule exit, paper), est. P&L ${pnl:.2f}")
+            out["exits"] += 1
     for sym in st.symbols:
         if last.get(sym, 0) <= 0 or sym in held or sym in waiting or (today, sym) in decided:
             continue

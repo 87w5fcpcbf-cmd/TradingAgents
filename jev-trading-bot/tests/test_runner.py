@@ -41,7 +41,15 @@ class FakeBroker:
         return 0.0
 
     def positions(self):
-        return [{"symbol": s} for s in self.held]
+        return [{"symbol": s, "qty": "10", "avg_entry_price": "480", "current_price": "500", "market_value": "5000"}
+                for s in self.held]
+
+    def close_position(self, symbol):
+        if self.fail:
+            raise BrokerError("down")
+        self.closed = getattr(self, "closed", []) + [symbol]
+        self.held.remove(symbol)
+        return {"id": "x"}
 
     def bracket_order(self, symbol, qty, stop_price, take_profit_price):
         if self.fail:
@@ -180,3 +188,42 @@ def test_no_rule_signal_means_no_jev_call(mk):
     d, _, calls = mk(data=down)
     tick(d)
     assert calls == [] and d.broker.orders == []
+
+
+def test_rule_exit_closes_held_position_without_calling_jev(mk):
+    down = pd.DataFrame({"SPY": np.linspace(500, 300, 300)}, index=pd.bdate_range(end=NOW, periods=300))
+    d, sent, calls = mk(data=down)
+    d.broker.held.append("SPY")
+    d.db.log_trade({"symbol": "SPY", "qty": 10, "price": 480, "pnl": None, "order_id": "o1"})
+    out = tick(d)
+    assert d.broker.closed == ["SPY"] and calls == [] and out["exits"] == 1
+    assert d.db.trades()[0]["pnl"] == pytest.approx(200.0)       # (500-480)*10
+    assert any("CLOSED" in m for m in sent)
+
+
+def test_held_position_kept_while_rule_still_long(mk):
+    d, _, _ = mk()
+    d.broker.held.append("SPY")
+    tick(d)
+    assert getattr(d.broker, "closed", []) == []
+
+
+def test_no_exits_when_killed(mk):
+    down = pd.DataFrame({"SPY": np.linspace(500, 300, 300)}, index=pd.bdate_range(end=NOW, periods=300))
+    d, _, _ = mk(data=down)
+    d.broker.held.append("SPY")
+    d.risk.trip("manual")
+    tick(d)
+    assert getattr(d.broker, "closed", []) == []
+
+
+def test_failed_exit_is_recorded_as_broker_error_and_alerted(mk):
+    down = pd.DataFrame({"SPY": np.linspace(500, 300, 300)}, index=pd.bdate_range(end=NOW, periods=300))
+    b = FakeBroker()
+    b.held.append("SPY")
+    d, sent, _ = mk(data=down, broker=b)
+    b.fail = False
+    orig = b.close_position
+    b.close_position = lambda s: (_ for _ in ()).throw(BrokerError("nope"))
+    tick(d)
+    assert d.db.get_int("cnt:broker") == 1 and any("EXIT FAILED" in m for m in sent)

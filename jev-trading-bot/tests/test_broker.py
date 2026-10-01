@@ -112,3 +112,24 @@ def test_staleness():
     assert dm.is_stale(df, pd.Timestamp("2026-10-05"))
     assert not dm.is_stale(df, pd.Timestamp("2026-09-28"))   # weekend gap tolerated
     assert dm.is_stale(pd.DataFrame(), pd.Timestamp("2026-09-28"))
+
+
+def test_close_position_cancels_open_orders_then_closes(monkeypatch):
+    seen = []
+
+    def fake(method, url, headers=None, json=None, params=None, timeout=None):
+        seen.append((method, url.replace(PAPER_URL, ""), params))
+        if method == "GET":
+            return Resp([{"id": "leg1"}, {"id": "leg2"}])
+        return Resp({})
+
+    monkeypatch.setattr(bm.requests, "request", fake)
+    bm.Broker().close_position("SPY")
+    assert seen[0][0] == "GET" and seen[0][2]["symbols"] == "SPY" and seen[0][2]["status"] == "open"
+    assert ("DELETE", "/v2/orders/leg1", None) in seen and ("DELETE", "/v2/orders/leg2", None) in seen
+    assert seen[-1][:2] == ("DELETE", "/v2/positions/SPY")
+
+
+def test_close_position_rejects_odd_symbols():
+    with pytest.raises(bm.BrokerError):
+        bm.Broker().close_position("../account")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 import requests
@@ -61,3 +62,11 @@ class Broker:
     def closed_orders(self) -> list[dict[str, Any]]:
         """Recent closed parent orders with their bracket legs (used to compute realized P&L)."""
         return self._req("GET", "/v2/orders", params={"status": "closed", "nested": "true", "limit": 100, "direction": "desc"})
+
+    def close_position(self, symbol: str) -> dict[str, Any]:
+        """Cancel the symbol's open bracket legs, then close the position at market."""
+        if not re.fullmatch(r"[A-Z][A-Z.]{0,5}", symbol):
+            raise BrokerError("invalid symbol")
+        for o in self._req("GET", "/v2/orders", params={"status": "open", "symbols": symbol, "nested": "true"}):
+            self._req("DELETE", f"/v2/orders/{o['id']}")
+        return self._req("DELETE", f"/v2/positions/{symbol}")
