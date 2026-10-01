@@ -1,0 +1,26 @@
+[project]
+name = "jevbot"
+version = "0.1.0"
+description = "Approval-gated paper-trading bot: rules propose, Jev gates, Alpaca paper executes."
+requires-python = ">=3.11"
+dependencies = [
+  "pandas", "numpy", "requests", "fastapi", "uvicorn",
+  "itsdangerous", "python-multipart",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx"]
+
+[project.scripts]
+jevbot = "jevbot.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
