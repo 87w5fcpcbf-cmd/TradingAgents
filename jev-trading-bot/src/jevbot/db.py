@@ -43,6 +43,13 @@ class Db:
         )
         self._c.commit()
 
+    def get_int(self, name: str, default: int = 0) -> int:
+        r = self._c.execute("SELECT value FROM flags WHERE name=?", (name,)).fetchone()
+        return int(r["value"]) if r else default
+
+    def set_int(self, name: str, value: int) -> None:
+        self.set_flag(name, value)  # flags.value is an INTEGER column; reused for persisted counters
+
     # json row tables -------------------------------------------------------
     def _log(self, table: str, row: dict[str, Any]) -> int:
         cur = self._c.execute(f"INSERT INTO {table}(ts,data) VALUES(?,?)", (time.time(), json.dumps(row)))
