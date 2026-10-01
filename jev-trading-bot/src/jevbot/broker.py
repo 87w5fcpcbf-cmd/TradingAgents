@@ -57,3 +57,7 @@ class Broker:
             "take_profit": {"limit_price": f"{take_profit_price:.2f}"},
         }
         return self._req("POST", "/v2/orders", json=body)
+
+    def closed_orders(self) -> list[dict[str, Any]]:
+        """Recent closed parent orders with their bracket legs (used to compute realized P&L)."""
+        return self._req("GET", "/v2/orders", params={"status": "closed", "nested": "true", "limit": 100, "direction": "desc"})

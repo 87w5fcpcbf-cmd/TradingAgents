@@ -170,3 +170,26 @@ def process_approvals(d: Deps) -> dict[str, int]:
         d.db.mark_approval(a["id"], "executed" if result == "ordered" else "failed")
         res["executed"] += result == "ordered"
     return res
+
+
+def sync_trades(d) -> int:
+    """Fill in realized P&L for trades whose bracket exit leg has filled. Returns trades updated."""
+    open_trades = [t for t in d.db.trades() if t.get("pnl") is None and t.get("order_id")]
+    if not open_trades:
+        return 0
+    try:
+        closed = {o["id"]: o for o in d.broker.closed_orders()}
+    except BrokerError:
+        return 0
+    n = 0
+    for t in open_trades:
+        o = closed.get(t["order_id"])
+        if not o:
+            continue
+        for leg in o.get("legs") or []:
+            if leg.get("status") == "filled" and leg.get("filled_avg_price"):
+                entry = float(o.get("filled_avg_price") or t["price"])
+                d.db.update_trade(t["id"], pnl=round((float(leg["filled_avg_price"]) - entry) * t["qty"], 2))
+                n += 1
+                break
+    return n

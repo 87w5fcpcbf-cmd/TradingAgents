@@ -70,6 +70,13 @@ class Db:
     def log_event(self, kind: str, row: dict[str, Any]) -> None:
         self._c.execute("INSERT INTO events(ts,kind,data) VALUES(?,?,?)", (time.time(), kind, json.dumps(row)))
         self._c.commit()
+    def update_trade(self, tid: int, **fields) -> None:
+        r = self._c.execute("SELECT data FROM trades WHERE id=?", (tid,)).fetchone()
+        if r:
+            d = json.loads(r["data"]); d.update(fields)
+            self._c.execute("UPDATE trades SET data=? WHERE id=?", (json.dumps(d), tid))
+            self._c.commit()
+
     def signals(self): return self._all("signals")
     def trades(self): return self._all("trades")
     def jev_calls(self): return self._all("jev_calls")
