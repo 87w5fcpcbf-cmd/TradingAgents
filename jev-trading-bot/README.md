@@ -20,7 +20,7 @@ Rules for what Jev can and cannot do:
 
 ## Status: what is and is not verified
 
-- 117 automated tests cover the engine, risk limits, kill switch, approvals, Jev client, broker, alerts, dashboard and CLI.
+- 120 automated tests cover the engine, risk limits, kill switch, approvals, Jev client, broker, alerts, dashboard and CLI.
 - **No real-market backtest has been run yet.** The build environment could not reach a market-data source. So `strategy.md` is intentionally absent and the bot **refuses to run** until `jevbot backtest` writes a validated one (or you pass `--allow-unvalidated`).
 - Not yet exercised against the live Jev, Alpaca or Telegram services (no keys in the build environment). The Jev client accepts both response shapes seen in your notes (`answers.<q>.*` and top-level); confirm with one real call.
 - The Docker files are written but were not built here.
@@ -37,14 +37,16 @@ Rules for what Jev can and cannot do:
    - `DASHBOARD_PASSWORD`: a long random password (the dashboard serves nothing without it).
    - `APPROVAL_USD`: trades above this wait for your `/approve` (default 5000).
    - Optional `HEALTHCHECK_URL`: a free [healthchecks.io](https://healthchecks.io) check; you get alerted if the bot goes silent.
-5. Get data and validate a strategy (use `pip install -e .` in a venv, or `docker compose run --rm bot ...`):
+5. Or skip steps 3-4: run `./scripts/pi_setup.sh` (see `docs/PI_SETUP_FOR_COWORK.md`); it creates `.env`, builds the image and runs `jevbot check`.
+6. Get data and validate a strategy:
    ```
-   jevbot fetch-data --years 7          # needs ALPACA_KEY/SECRET; writes data_cache/
-   jevbot backtest                      # evaluates 6 candidates out-of-sample, writes strategy.md for the best survivor
+   docker compose run --rm bot check
+   docker compose run --rm bot fetch-data --years 7 --dir /data/data_cache
+   docker compose run --rm bot backtest --dir /data/data_cache --out /data/strategy.md
    ```
    If nothing survives, **do not trade**; the command says so and writes nothing. The filter is strict by design (max drawdown < 15%, at least 30 trades, profit factor > 1.3). Low-frequency strategies often fail the 30-trade rule; relax with `--min-trades` knowingly, not casually.
-6. Start it: `mkdir -p data && docker compose up -d --build`. Check `docker compose logs -f bot`.
-7. Dashboard: `http://localhost:8000` (localhost only). For your phone use [Tailscale](https://tailscale.com) (`tailscale serve 8000`); do not open the port to the internet.
+7. Start it (only if a strategy was written): `docker compose up -d --build`. Check `docker compose logs -f bot`.
+8. Dashboard: `http://localhost:8000` (localhost only). For your phone use [Tailscale](https://tailscale.com) (`tailscale serve 8000`); do not open the port to the internet.
 
 ## Safety rails (all enforced in code, in `risk.py`)
 
@@ -59,7 +61,7 @@ Rules for what Jev can and cannot do:
 | Kill switch | persisted; halts all entries and rule exits; reset only on the machine with `jevbot reset` |
 
 Telegram commands (your chat only): `/status`, `/kill`, `/approve [id]`, `/reject [id]`.
-CLI: `jevbot status | report | kill | reset | dashboard | run`.
+CLI: `jevbot check | fetch-data | backtest | run | status | report | kill | reset | dashboard`.
 
 ## Before going anywhere near live money
 

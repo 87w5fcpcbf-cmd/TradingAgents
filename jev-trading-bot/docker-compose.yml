@@ -1,13 +1,13 @@
 # PAPER TRADING ONLY. Secrets come from .env (chmod 600, never committed).
+# Everything the containers write or read (database, price cache, strategy.md) lives in ./data.
 services:
   bot:
     build: .
-    command: ["run", "--strategy", "/app/strategy.md"]
+    command: ["run", "--strategy", "/data/strategy.md"]
     # To paper trade an unvalidated strategy, append "--allow-unvalidated" (not recommended).
     env_file: .env
     volumes:
       - ./data:/data
-      - ./strategy.md:/app/strategy.md:ro
     restart: unless-stopped
   dashboard:
     build: .
@@ -15,7 +15,7 @@ services:
     env_file: .env
     volumes:
       - ./data:/data
-    # Localhost only. For phone access use Tailscale (`tailscale serve`) rather than opening this port.
+    # Localhost only. For phone access use Tailscale (`tailscale serve 8000`); never open this to the internet.
     ports:
       - "127.0.0.1:8000:8000"
     restart: unless-stopped

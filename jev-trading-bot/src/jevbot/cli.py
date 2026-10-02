@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from . import backtest as bt
+from . import jev as jev_mod
 from .alerts import Alerts
 from .broker import Broker, BrokerError
 from .config import Config
@@ -78,6 +79,46 @@ def backtest_cmd(data_dir: str, out: str, max_dd: float = 0.15, min_trades: int 
         with open(out, "w", encoding="utf-8") as f:
             f.write(render(s, stats))
     return rows, winner
+
+
+def check_cmd() -> list[tuple[str, bool, str]]:
+    """Verify each external connection. Returns (name, ok, detail); details never contain secrets."""
+    out: list[tuple[str, bool, str]] = []
+
+    def step(name, fn):
+        try:
+            out.append((name, True, fn()))
+        except Exception as e:
+            out.append((name, False, f"{type(e).__name__}: {e}" if not isinstance(e, (BrokerError, DataError, jev_mod.JevError)) else str(e)))
+
+    def alpaca_account():
+        a = Broker().account()
+        return f"paper equity ${a['equity']:,.2f}"
+
+    def alpaca_data():
+        end = dt.date.today()
+        df = alpaca_bars(["SPY"], str(end - dt.timedelta(days=10)), str(end))
+        return f"{len(df)} recent SPY bars"
+
+    def jev_call():
+        r = jev_mod.ask({"word": "banana"}, {"q": jev_mod.choice_question("Is `word` a colour?", {"yes": None, "no": None})})
+        a = r.answers["q"]
+        return f"model {r.model}, answered {a['choice']!r} ({a['confidence']:.2f}), {r.latency_s:.2f}s"
+
+    def telegram():
+        tok, chat = os.environ.get("TELEGRAM_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
+        if not tok or not chat:
+            raise RuntimeError("not configured (TELEGRAM_TOKEN / TELEGRAM_CHAT_ID)")
+        try:
+            requests.post(f"https://api.telegram.org/bot{tok}/sendMessage",
+                          json={"chat_id": chat, "text": "jevbot check: Telegram works (paper bot)."}, timeout=10).raise_for_status()
+        except requests.RequestException as e:
+            raise RuntimeError(f"send failed ({type(e).__name__})") from None  # URL contains the token: type only
+        return "test message sent"
+
+    for name, fn in (("alpaca account", alpaca_account), ("alpaca data", alpaca_data), ("jev", jev_call), ("telegram", telegram)):
+        step(name, fn)
+    return out
 
 
 def check_runnable(path: str, allow_unvalidated: bool) -> Strategy:
@@ -178,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--min-pf", type=float, default=1.3); b.add_argument("--allow-leveraged", action="store_true")
     r = sub.add_parser("run", help="run the paper-trading bot")
     r.add_argument("--strategy", default="strategy.md"); r.add_argument("--allow-unvalidated", action="store_true")
+    sub.add_parser("check", help="test Alpaca, Jev and Telegram connections")
     sub.add_parser("report"); sub.add_parser("status"); sub.add_parser("kill"); sub.add_parser("reset")
     d = sub.add_parser("dashboard"); d.add_argument("--host", default="127.0.0.1"); d.add_argument("--port", type=int, default=8000)
     a = ap.parse_args(argv)
@@ -192,6 +234,11 @@ def main(argv: list[str] | None = None) -> int:
             rows, winner = backtest_cmd(a.dir, a.out, a.max_dd, a.min_trades, a.min_pf, allow_leveraged=a.allow_leveraged)
             _print_table(rows)
             print(f"\nWinner: {winner}; wrote {a.out}" if winner else "\nNo candidate survived the filter. Nothing written. Do not trade.")
+        elif a.cmd == "check":
+            res = check_cmd()
+            for name, ok, detail in res:
+                print(f"{'PASS' if ok else 'FAIL'}  {name}: {detail}")
+            return 0 if all(ok for _, ok, _ in res) else 1
         elif a.cmd == "run":
             run_loop(_build_deps(a))
         else:
